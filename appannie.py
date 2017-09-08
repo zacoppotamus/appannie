@@ -19,21 +19,21 @@ import settings as _s
 def main():
 	""" Run the whole toolchain for all accounts. """
 	_clean()
-	
+
 	for account in _accounts():
 		if 'account_id' not in account:
 			raise Exception("There is no 'account_id' in the account dictionary, did the API change?")
 		if 'account_name' not in account:
 			raise Exception("There is no 'account_name' in the account dictionary, did the API change?")
-		
+
 		account_id = account['account_id']
 		account_name = account['account_name']
-		
+
 		# CSV file for reviews per account
 		with io.open('Reviews {}.csv'.format(account_name), 'w', encoding='UTF-8') as comm:
 			w_comm = csv.writer(comm)
 			w_comm.writerow(["App","version","country","date","title","text","reviewer"])
-			
+
 			# loop apps
 			for app in _apps(account_id):
 				if _s.add_delay:
@@ -50,12 +50,12 @@ def main():
 				print()
 				print(app_title)
 				print(''.join(['=' for i in range(0, len(app_title))]))
-				
+
 				# dump and print reviews
 				n = 0
 				for rev in _reviews(account, app_id):
 					w_comm.writerow([app_name, rev['version'], rev['country'], rev['date'], _sf(rev['title']), _sf(rev['text']), _sf(rev['reviewer'])])
-					
+
 					# print last 7 reviews
 					if n < 7:
 						stars = '%s%s' % (''.join([u"★" for i in range(rev['rating'])]), ''.join([u"☆" for i in range(5 - rev['rating'])]))
@@ -64,9 +64,9 @@ def main():
 						print(rev['text'])
 						print("%s, %s" % (rev['date'], rev['reviewer']))
 					n += 1
-				
+
 				sales = _sales(account, app_id)
-				
+
 				# create CSV for sales data per app; R will create graphs named after the filename
 				csv_path = 'Numbers {}.csv'.format(app_title.replace('/', '|'))
 				csv_exists = os.path.exists(csv_path)
@@ -75,7 +75,7 @@ def main():
 					w_csv = csv.writer(hndl)
 					if not csv_exists:
 						w_csv.writerow(["date","num_downloads","num_updates","num_refunds","sales","refunds"])
-					
+
 					alter = _s.alter_data.get(app_id)
 					for sale in sales:
 						s_date = sale.get('date')
@@ -87,7 +87,7 @@ def main():
 								if s_num.get(a_what) == a_chg[0]:
 									s_num[a_what] = a_chg[1]
 						w_csv.writerow([s_date, s_num.get('downloads'), s_num.get('updates'), s_num.get('refunds'), s_sale.get('downloads'), s_sale.get('refunds')])
-	
+
 	# run R script to generate PDFs
 	if _s.run_r:
 		subprocess.call(['R', '--vanilla', '--slave', '-f', 'appannie.R'])
@@ -104,19 +104,19 @@ def _get(path):
 	assert _s.api_key
 	assert _s.base_url
 	assert path and len(path) > 0
-	
+
 	headers = {
 		'Authorization': 'Bearer {}'.format(_s.api_key),
 		'content-type': 'application/json'
 	}
-	
+
 	url = os.path.join(_s.base_url, path)
 	r = requests.get(url, headers=headers)
 	try:
 		r.raise_for_status()
 	except Exception as e:
 		print("Failed to download:\n%s\n%s" % (url, e))
-	
+
 	return r.json()
 
 def _accounts():
@@ -133,12 +133,13 @@ def _sales(account, app_id, start=None, end=None):
 	raw = _get('accounts/{}/products/{}/sales?break_down=date'.format(account.get('account_id'), app_id))
 	if 'sales_list' in raw:
 		sales.extend(raw['sales_list'])
-	
-	# TODO: more pages?
-	nxt = raw.get('next_page')
-	if nxt is not None:
-		print("MUST GET NEXT PAGE - NOT IMPLEMENTED", nxt)
-	
+
+	while raw.get('next_page') is not None:
+		raw = _get(raw.get('next_page').split('/v1.2/')[1])
+		print("RETRIEVED NEXT PAGE", raw.get('next_page'))
+		if 'sales_list' in raw:
+			sales.extend(raw['sales_list'])
+
 	return sales
 
 def _reviews(account, app_id, start=None, end=None):
@@ -148,7 +149,7 @@ def _reviews(account, app_id, start=None, end=None):
 	if start is None:
 		d_start = date.today() - timedelta(days=31)
 		start = d_start.isoformat()
-	
+
 	raw = _get('{}/{}/app/{}/reviews?break_down=date'.format(account.get('vertical'), account.get('market'), app_id))
 	return raw.get('reviews', [])
 
